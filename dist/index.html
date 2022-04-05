@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>vue3-test</title>
+    <script src="./index.js"></script>
+    <script src="./vue.global.js"></script>
+</head>
+
+<body>
+    <div id="person1">
+        <h1 class="effect1"></h1>
+        <h1 class="effect2"></h1>
+        <h1 class="effect22"></h1>
+        <h1 class="effect23"></h1>
+        <h1 class="effect3"></h1>
+        <h1 class="effect4"></h1>
+    </div>
+    <div id="person2">
+        <h1 class="effect10"></h1>
+        <h1 class="effect20"></h1>
+        <h1 class="effect220"></h1>
+        <h1 class="effect230"></h1>
+        <h1 class="effect30"></h1>
+        <h1 class="effect40"></h1>
+    </div>
+    <div id="person3">
+        <h1 class="effectOuter"></h1>
+        <h1 class="effectInner"></h1>
+    </div>
+    <script>
+        const {
+            reactive,
+            effect
+        } = MVue;
+        /* 避免无线递归循环 */
+        (function () {
+            const person = reactive({
+                name: 'Andy',
+                age: 5,
+            });
+            effect(() => {
+                console.log('effect');
+                document.querySelector('#person3 .effectInner').innerText = person.age++;
+            })
+        })();
+
+        /* effect嵌套和重复执行的测试案例 */
+        (function () {
+            const person3 = reactive({
+                name: 'Andy',
+                age: 5,
+            });
+            effect(() => {
+                console.log('effectOuter')
+                effect(() => {
+                    console.log('effectInner');
+                    document.querySelector('#person3 .effectInner').innerText = person3.age + 1;
+                })
+                document.querySelector('#person3 .effectOuter').innerText = person3.name;
+            })
+
+            setTimeout(() => {
+                person3.name = 'Tom';
+                // 加上下面的就是重复执行
+                person3.age = 100;
+            }, 3000)
+        });
+        /* 完善响应式系统的测试案例 */
+        (function () {
+            const person1 = reactive({
+                name: 'tom',
+                age: 11,
+                sex: 'man'
+            });
+            const person2 = reactive({
+                name: 'mary',
+                age: 10,
+                sex: 'women'
+            });
+
+            const person3 = {
+                name: 'tom',
+                age: 11,
+                sex: 'man'
+            };
+
+            effect(() => {
+                document.querySelector('#person1 .effect1').innerText = person1.name;
+            });
+            effect(() => {
+                document.querySelector('#person1 .effect2').innerText = person1.age;
+            });
+            effect(() => {
+                document.querySelector('#person1 .effect22').innerText = person1.age + 100;
+            });
+            effect(() => {
+                document.querySelector('#person1 .effect23').innerText = person1.age + 200;
+            });
+            effect(() => {
+                document.querySelector('#person1 .effect3').innerText = person1.sex;
+            });
+            effect(() => {
+                document.querySelector('#person1 .effect4').innerText = person1.a
+            });
+            setTimeout(() => {
+                Object.assign(person1, person2);
+            }, 2000);
+            setTimeout(() => {
+                person1.a = 'hello world';
+            }, 3000);
+
+            effect(() => {
+                document.querySelector('#person2 .effect10').innerText = person2.name;
+            });
+            effect(() => {
+                document.querySelector('#person2 .effect20').innerText = person2.age;
+            });
+            effect(() => {
+                document.querySelector('#person2 .effect220').innerText = person2.age + 100;
+            });
+            effect(() => {
+                document.querySelector('#person2 .effect230').innerText = person2.age + 200;
+            });
+            effect(() => {
+                document.querySelector('#person2 .effect30').innerText = person2.sex;
+            });
+            effect(() => {
+                document.querySelector('#person2 .effect40').innerText = person2.a
+            });
+            setTimeout(() => {
+                Object.assign(person2, person3);
+            }, 4000);
+            setTimeout(() => {
+                person2.a = 'hello world';
+            }, 5000);
+        });
+        /* 实现一个简单的响应式系统 */
+        (function () {
+            const data = {
+                str: 'hello world',
+            }
+
+            function effect() {
+                document.body.innerText = proxy.str;
+            }
+            let fn;
+            const proxy = new Proxy(data, {
+                get(target, key) {
+                    fn = effect;
+                    return target[key]
+                },
+                set(target, key, newVal) {
+                    target[key] = newVal;
+                    fn();
+                    return true;
+                }
+            })
+            effect();
+            setTimeout(() => {
+                proxy.str = '111'
+            }, 1000)
+        });
+    </script>
+</body>
+
+</html>
