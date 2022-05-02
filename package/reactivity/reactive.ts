@@ -1,10 +1,11 @@
-import { activeEffect, effect } from "./effect";
+import { activeEffect, effectOptions } from "./effect";
 
-interface obj {
+export interface obj {
     [key: string]: any
 }
 interface fn {
-    (): void
+    (): void,
+    options?:effectOptions
 }
 type fnSetType = Set<fn>;
 // 创建一个全局的 bucket 变量，用来保存 data 和 Map 对象的映射关系
@@ -30,12 +31,19 @@ function trigger(target: obj, key: string) {
     const deps = depsMap.get(key);
     //新增变量 effectToRun 保存需要执行的副作用函数,避免无线递归循环
     const effectToRun = new Set<fn>();
-    deps && deps.forEach(effect => {
-        if (effect !== activeEffect) {
-            effectToRun.add(effect)
+    deps && deps.forEach(effectFn => {
+        if (effectFn !== activeEffect) {
+            effectToRun.add(effectFn)
         }
     });
-    effectToRun.forEach(effect => effect())
+    effectToRun.forEach(effectFn =>{
+        // 如果副函数的 options 上存在调度器 scheduler，则将 副函数传递给调度器执行
+        if(effectFn.options && effectFn.options.scheduler){
+            effectFn.options.scheduler(effectFn)
+        }else{
+            effectFn()
+        }
+    } )
 }
 
 // 封装一个 reactive 函数，实现对对象的拦截

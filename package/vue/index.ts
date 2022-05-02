@@ -1,7 +1,8 @@
-import { reactive, effect } from "../reactivity/index";
+import { reactive, effect,computed } from "../reactivity/index";
 const Vue = {
     createApp() { },
     reactive,
-    effect
+    effect,
+    computed
 };
 export default Vue;

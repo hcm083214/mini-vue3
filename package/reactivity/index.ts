@@ -1,3 +1,4 @@
 import { reactive } from "./reactive";
 import { effect } from "./effect";
-export  { reactive, effect }
+import { computed } from "./computed";
+export  { reactive, effect ,computed}

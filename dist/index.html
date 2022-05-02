@@ -11,6 +11,32 @@
 </head>
 
 <body>
+    <ul>
+        <li>0</li>
+        <li>1</li>
+        <li>2</li>
+        <li>3</li>
+        <li>4</li>
+        <li>5</li>
+        <li>6</li>
+        <li>7</li>
+        <li>8</li>
+        <li>9</li>
+    </ul>
+    <script>
+        const lis = document.querySelectorAll('li');
+        // document.querySelectorAll('li')
+        // for(let i=0;i<lis.length;i++){
+        //     lis[i].addEventListener('click',()=>{
+        //         console.log(i)
+        //     })
+        // }
+        document.querySelector('ul').addEventListener('click',(e)=>{
+            if(e.target.nodeName == 'LI'){
+                console.log(e.target.innerText)
+            }
+        })
+    </script>
     <div id="person1">
         <h1 class="effect1"></h1>
         <h1 class="effect2"></h1>
@@ -31,25 +57,41 @@
         <h1 class="effectOuter"></h1>
         <h1 class="effectInner"></h1>
     </div>
+    <div class="data">
+        <h1 class="cp"></h1>
+    </div>
     <script>
         const {
             reactive,
-            effect
+            effect,computed
         } = MVue;
+        /* 实现一个 computed */
+        // (function(){
+            const data = reactive({
+                num:1,
+            });
+            const doubleData = computed(()=>{
+               return data.num * 2
+            }); 
+            effect(()=>{
+                document.querySelector('.data .cp').innerText = doubleData.value
+            })
+            console.log("🚀 ~ file: index.html ~ line 48 ~ doubleData", doubleData.value)
+        // })();
         /* 避免无线递归循环 */
-        (function () {
+/*         (function () {
             const person = reactive({
                 name: 'Andy',
                 age: 5,
             });
             effect(() => {
                 console.log('effect');
-                document.querySelector('#person3 .effectInner').innerText = person.age++;
+                document.querySelector('#person3 .effectInner').innerText = ++person.age;
             })
-        })();
+        }); */
 
         /* effect嵌套和重复执行的测试案例 */
-        (function () {
+/*         (function () {
             const person3 = reactive({
                 name: 'Andy',
                 age: 5,
@@ -68,9 +110,9 @@
                 // 加上下面的就是重复执行
                 person3.age = 100;
             }, 3000)
-        });
+        }); */
         /* 完善响应式系统的测试案例 */
-        (function () {
+/*         (function () {
             const person1 = reactive({
                 name: 'tom',
                 age: 11,
@@ -138,8 +180,9 @@
                 person2.a = 'hello world';
             }, 5000);
         });
+        */
         /* 实现一个简单的响应式系统 */
-        (function () {
+/*         (function () {
             const data = {
                 str: 'hello world',
             }
@@ -163,7 +206,7 @@
             setTimeout(() => {
                 proxy.str = '111'
             }, 1000)
-        });
+        }); */
     </script>
 </body>
 

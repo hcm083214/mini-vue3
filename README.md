@@ -682,7 +682,7 @@ WeakMap {{…} => Map(2)}
 
 ### 副作用函数嵌套的处理
 
-接着看如下情况，在副作用函数 effect 函数中嵌套使用 effect，对应到 vue 的使用情形是在一个组件中使用了另一个组件。
+在副作用函数 effect 函数中嵌套使用 effect，对应到 vue 的使用情形是在一个组件中使用了另一个组件。看如下情况，出现了副作用函数未被正确的属性收集的问题：
 
 ```html
 <div id="person3">
@@ -690,31 +690,240 @@ WeakMap {{…} => Map(2)}
     <h1 class="effectInner"></h1>
 </div>
 <script>
-const person3 = reactive({
+    const person3 = reactive({
+        name: 'Andy',
+        age: 5,
+    });
+    effect(() => {
+        console.log('effectOuter')
+        effect(() => {
+            console.log('effectInner');
+            document.querySelector('#person3 .effectInner').innerText = person3.age + 1;
+        })
+        document.querySelector('#person3 .effectOuter').innerText = person3.name;
+    })
+
+    setTimeout(() => {
+        person3.name = 'Tom';
+    }, 3000)
+    // effectOuter
+    // effectInner
+    // effectInner
+    /*
+    	符合预期的结果，同时页面上的 name 改为 Tom
+    	// effectOuter
+    	// effectInner
+    	// effectOuter
+    	// effectInner
+    */
+</script>
+```
+
+出现以上问题的原因在于副作用函数收集出了问题：activeEffect 变量在执行嵌套 effect 函数时发生了改变。执行到内部的 effect 函数时 activeEffect 被覆盖为内部的 effect 函数并且不再改变，再之后执行外部的代码触发 track 函数此时保存的是内部的 effect 函数。知道原因后，我们可以添加 effectStack 变量，用来记录 activeEffect。 修改后的代码如下：
+
+```js
+// 创建一个全局变量，用来保存被注册的副作用函数
+let activeEffect;
+// 创建变量 effectStack 用来保存 activeEffect
+const effectStack = [];
+// effect 函数用来注册副作用函数，而非副作用函数本身
+function effect(fn) {
+    activeEffect = fn;
+    // activeEffect 入栈，当存在 effect 嵌套时保存所有的 activeEffect（副作用函数）
+    effectStack.push(activeEffect);
+    // 副作用函数执行，若存在 effect 嵌套，则会重新调用 effect，将 activeEffect 入栈
+    fn();
+    // 将已执行的副作用函数出栈
+    effectStack.pop();
+    // 还原副作用函数为之前的值
+    activeEffect = effectStack[effectStack.length - 1];
+}
+```
+
+### 避免无限递归循环
+
+考虑如下情况，当属性自加时，会直接报错 `Uncaught RangeError: Maximum call stack size exceeded`：
+
+```js
+const person = reactive({
     name: 'Andy',
     age: 5,
 });
 effect(() => {
-    console.log('effectOuter')
-    effect(() => {
-        console.log('effectInner');
-        document.querySelector('#person3 .effectInner').innerText = person3.age + 1;
-    })
-    document.querySelector('#person3 .effectOuter').innerText = person3.name;
+    console.log('effect');
+    document.querySelector('#person3 .effectInner').innerText = person.age++;
 })
-
-setTimeout(() => {
-    person3.name = 'Tom';
-}, 3000)
-// effectOuter
-// effectInner
-// effectInner
-</script>
 ```
 
-符合预期的响应式是当修改age 时，'effectInner' 只打印 2 次。但是得到的结果是一共打印了 4 次，原因在于我们执行嵌套的副作用函数时，在 track 时执行到内部的副作用函数时全局变量 activeEffect 会被重置为内部的副作用函数，从而被多次添加到 Set 对象内。解决方式是将 activeEffect 保存在栈中，修改后的代码如下：
+原因发生在 `person.age++` 上，当进行自增操作时其实会分成两步：读取 `person.age` 的值，加 1 后再修改 `person.age` 值。既触发了 get 执行 track 函数收集副作用函数，又触发 set 执行 trigger 函数执行副作用函数。解决方式很简单：在 trigger 函数中增加判断，如果trigger 函数中执行的副作用函数与需要收集的副作用函数相同，则不执行副作用函数，代码修改如下：
 
 ```js
-
+function trigger(target: obj, key: string) {
+    const depsMap = bucket.get(target);
+    if (!depsMap) return
+    const deps = depsMap.get(key);
+    //新增变量 effectToRun 保存需要执行的副作用函数,避免无线递归循环
+    const effectToRun = new Set<fn>();
+    deps && deps.forEach(effect => {
+        if (effect !== activeEffect) {
+            effectToRun.add(effect)
+        }
+    });
+    effectToRun.forEach(effect => effect())
+}
 ```
+
+# 实现一个 computed
+
+## 用法
+
+先看看 computed 的用法
+
+```js
+const data = reactive({
+    num:0,
+});
+const doubleData = computed(()=>data.num * 2); 
+document.querySelector('.data .cp').innerText = doubleData.value;
+```
+
+这里我们给 `computed` 函数传递了第一个参数，它是一个类似 getter 的回调函数，输出的是一个*只读*的**响应式引用**。为了访问新创建的计算变量的 **value**，我们需要像 `ref` 一样使用 `.value` property。
+
+知道功能及用法后，接下来看看源码里是如何实现的。
+
+## 源码思路剖析
+
+### computed 响应式思路
+
+对于 computed 来说，需要实现的功能包括2部分：
+
+1. `computed` 函数传递了第一个参数，输出的是一个*只读*的**响应式引用**。
+2. 响应式引用需要使用 `.value` property 来访问
+
+伪代码形式如下：
+
+```js
+function computed(fn){
+    let effectFn;
+    // 实现响应式，响应式引用读取时才触发 fn 的执行，触发 getter 
+    effectFn = effect(fn);
+    // 返回一个响应式的引用，需要使用 .value 来访问
+    return {
+        get value(){
+            return effectFn()
+        }
+    }
+}
+```
+
+这段伪代码实现的难点在于只有当读取响应式引用的值时，才触发 fn 执行实现响应式。在 vue3 源码该功能的实现是通过在 effect 函数中添加 lazy 选项来实现的。
+
+### computed 实现
+
+```js
+function computed(fn) {
+    const effectFn = effect(fn, { lazy: true });
+    const obj = {
+        get value() {
+            return effectFn();
+        }
+    };
+    return obj;
+}
+
+function effect(fn, options) {
+    const effectFn = function () {
+        activeEffect = fn;
+        // activeEffect 入栈，当存在 effect 嵌套时保存所有的 activeEffect（副作用函数）
+        effectStack.push(activeEffect);
+        // 副作用函数执行，若存在 effect 嵌套，则会重新调用 effect，将 activeEffect 入栈
+        const res = fn();
+        // 将已执行的副作用函数出栈
+        effectStack.pop();
+        // 还原副作用函数为之前的值
+        activeEffect = effectStack[effectStack.length - 1];
+        return res;
+    };
+    if (!options || !options.lazy) {
+        effectFn();
+    }
+    return effectFn;
+}
+```
+
+通过添加 lazy 属性，computed 不会立即执行。当计算属性被使用时，触发 getter 执行 effect 函数收集使用过计算属性的函数。
+
+computed 还有缓存的特性，下面看下 vue3 是怎么实现的：
+
+```js
+function effect(fn, options) {
+    const effectFn = function () {
+        activeEffect = effectFn;
+        // activeEffect 入栈，当存在 effect 嵌套时保存所有的 activeEffect（副作用函数）
+        effectStack.push(activeEffect);
+        // 副作用函数执行，若存在 effect 嵌套，则会重新调用 effect，将 activeEffect 入栈
+        const res = fn();
+        // 将已执行的副作用函数出栈
+        effectStack.pop();
+        // 还原副作用函数为之前的值
+        activeEffect = effectStack[effectStack.length - 1];
+        return res;
+    };
+    // 是否为懒加载
+    if (!options || !options.lazy) {
+        effectFn();
+    }
+    // 将 options 属性挂载到 effectFn 上
+    effectFn.options = options;
+    return effectFn;
+}
+
+function trigger(target, key) {
+    const depsMap = bucket.get(target);
+    if (!depsMap)
+        return;
+    const deps = depsMap.get(key);
+    //新增变量 effectToRun 保存需要执行的副作用函数,避免无线递归循环
+    const effectToRun = new Set();
+    deps && deps.forEach(effectFn => {
+        if (effectFn !== activeEffect) {
+            effectToRun.add(effectFn);
+        }
+    });
+    effectToRun.forEach(effectFn => {
+        // 如果副函数的 options 上存在调度器 scheduler，则将 副函数传递给调度器执行
+        if (effectFn.options && effectFn.options.scheduler) {
+            effectFn.options.scheduler(effectFn);
+        }
+        else {
+            effectFn();
+        }
+    });
+}
+
+function computed(fn) {
+    // 创建 dirty 变量，如果为真表示需要重新计算值 
+    let dirty = true, value;
+    const effectFn = effect(fn, {
+        lazy: true, scheduler() {
+            dirty = true;
+        }
+    });
+    const obj = {
+        get value() {
+            if (dirty) { // 只有 dirty 为真时才计算，并将得到的值缓存到 value 中
+                value = effectFn();
+                // 将 dirty 值设置为 false， 下次访问直接使用缓存中的值
+                dirty = false;
+            }
+            return value;
+        }
+    };
+    return obj;
+}
+```
+
+
+
+
 
